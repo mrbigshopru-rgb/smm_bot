@@ -161,8 +161,14 @@ def handle_smm_post(message):
         bot.edit_message_text(chat_id=message.chat.id, message_id=status_msg.message_id, text=report)
 
 def run_bot():
-    print("[SMM Комбайн]: Телеграм-пуллинг запущен...")
-    bot.infinity_polling()
+    try:
+        print("[SMM Комбайн]: Сброс старых сессий Telegram...")
+        bot.delete_webhook(drop_pending_updates=True)
+        time.sleep(2)  # Даем серверам ТГ выдохнуть после сброса
+        print("[SMM Комбайн]: Чистый запуск телеграм-пуллинга...")
+        bot.infinity_polling()
+    except Exception as polling_err:
+        print(f"[Критическая ошибка пуллинга]: {polling_err}")
 
 if __name__ == "__main__":
     threading.Thread(target=run_bot, daemon=True).start()
