@@ -137,4 +137,42 @@ def handle_smm_post(message):
     telegram_image_url = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{file_info.file_path}"
 
     if message.media_group_id:
-        mg
+        mg_id = message.media_group_id
+        with storage_lock:
+            if mg_id not in album_storage: album_storage[mg_id] = {"text": text, "urls": [], "file_ids": [], "processed": False}
+            album_storage[mg_id]["urls"].append(telegram_image_url)
+            album_storage[mg_id]["file_ids"].append(file_id)
+            if text and not album_storage[mg_id]["text"]: album_storage[mg_id]["text"] = text
+            is_first = (len(album_storage[mg_id]["urls"]) == 1)
+        if is_first: threading.Thread(target=process_album_and_post, args=(message.chat.id, mg_id)).start()
+    else:
+        status_msg = bot.reply_to(message, "⏳ Публикую одиночный пост...")
+        vk_photo = upload_photo_to_vk_wall(telegram_image_url)
+        vk_post_id = post_to_vk_wall(text + VK_FOOTER, attachments=[vk_photo] if vk_photo else None)
+        max_token = upload_photo_to_max(telegram_image_url)
+        max_success = post_to_max(text + MAX_FOOTER, tokens=[max_token] if max_token else None)
+        tg_success = post_to_telegram_channel(text + TG_FOOTER, [file_id])
+        
+        report = f"📊 **Отчет:**\n✅ ВК: {'Опубликовано' if vk_post_id else '❌ Ошибка'}\n✅ ТГ: {'Опубликовано' if tg_success else '❌ Ошибка'}\n✅ МАКС: {'Опубликовано' if max_success else '❌ Ошибка'}"
+        bot.edit_message_text(chat_id=message.chat.id, message_id=status_msg.message_id, text=report)
+
+def run_bot_polling():
+    try:
+        print("[SMM Комбайн]: Сброс старых сессий...")
+        bot.delete_webhook(drop_pending_updates=True)
+        time.sleep(1)
+        print("[SMM Комбайн]: Запуск пуллинга Telegram...")
+        bot.infinity_polling()
+    except Exception as polling_error:
+        # Если процесс натыкается на 409 конфликт, он просто мягко засыпает, не роняя весь сервер
+        print(f"[Инфо]: Процесс пуллинга уступлен основному воркеру. Ошибка: {polling_error}")
+        while True:
+            time.sleep(3600)
+
+if __name__ == "__main__":
+    # Запускаем пуллинг в фоновом потоке с защитой от падения всего контейнера
+    threading.Thread(target=run_bot_polling, daemon=True).start()
+        
+    port = int(os.environ.get("PORT", 10000))
+    print(f"[Веб-Сервер]: Запуск Flask на порту {port}...")
+    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
