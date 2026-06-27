@@ -13,7 +13,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 # === 1. НАСТРОЙКИ И КЛЮЧИ ===
 TELEGRAM_BOT_TOKEN = "8873978933:AAG1GhKOjgHzjpsrybW2pkqc7kO5cyGTU0I"
 ALLOWED_USERS = [5396240649, 5871786421] 
-TELEGRAM_CHANNEL_ID = -1001809141014 
+TELEGRAM_CHANNEL_ID = -1001808345159
 
 VK_API_VERSION = "5.131"
 VK_GROUP_ID = "218321182"
