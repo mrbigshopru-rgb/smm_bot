@@ -31,12 +31,10 @@ storage_lock = threading.Lock()
 
 app = Flask(__name__)
 
-# Точка входа для пингатора UptimeRobot
 @app.route('/')
 def home():
     return "SMM Комбайн активен и работает через Webhook!", 200
 
-# Точка входа для обновлений от Telegram
 @app.route('/webhook', methods=['POST'])
 def webhook():
     if request.headers.get('content-type') == 'application/json':
@@ -49,7 +47,7 @@ def webhook():
 
 # === ШАБЛОНЫ ПОДПИСЕЙ С СЫЛКАМИ ===
 TG_FOOTER = """\n\nЗаказать вещи 🛍\nможно в [боте](https://t.me/poizon_life_bot)🤖 через [менеджера](https://t.me/PoizonLifeRu) или в [МАКС](https://inlnk.ru/NDdGgP)👋\n \n[Наши отзывы](https://t.me/poizon_life_reviews) 😍\nАдрес: Толубеевский проезд 8к2, офис 1378 📍 всегда ждём в гости ❤️"""
-VK_FOOTER = """\n\nЗаказать вещи 🛍\nможно в боте🤖 t.me/poizon_life_bot через менеджера t.me/PoizonLifeRu box или в МАКС👋 inlnk.ru/NDdGgP\n \nНаши отзывы t.me/poizon_life_reviews 😍\nАдрес: Толубеевский проезд 8к2, офис 1378 📍 всегда ждём в гости ❤️"""
+VK_FOOTER = """\n\nЗаказать вещи 🛍\nможно в боте🤖 t.me/poizon_life_bot через менеджера t.me/PoizonLifeRu box или в МАКС👋 inlnk.ru/NDdGgP\n \nНаши отзывы t.me/poizon_life_reviews) 😍\nАдрес: Толубеевский проезд 8к2, офис 1378 📍 всегда ждём в гости ❤️"""
 MAX_FOOTER = """\n\nЗаказать вещи 🛍\nможно в [боте](https://t.me/poizon_life_bot)🤖 через менеджера в [МАКС](https://inlnk.ru/NDdGgP)👋\n \n[Наши отзывы](https://t.me/poizon_life_reviews) 😍\nАдрес: Толубеевский проезд 8к2, офис 1378 📍 всегда ждём в гости ❤️"""
 
 def upload_photo_to_max(image_url):
@@ -109,17 +107,29 @@ def post_to_vk_wall(text, attachments=None):
         return res.get('response', {}).get('post_id')
     except Exception: return None
 
+# === УМНЫЙ МЕТОД ОТПРАВКИ В ТГ ===
 def post_to_telegram_channel(text, file_ids):
     try:
+        # Пробуем стандартную отправку с Markdown
         if len(file_ids) == 1:
             bot.send_photo(chat_id=TELEGRAM_CHANNEL_ID, photo=file_ids[0], caption=text, parse_mode="Markdown")
-            return True
-        media = [InputMediaPhoto(f_id, caption=text, parse_mode="Markdown") if i == 0 else InputMediaPhoto(f_id) for i, f_id in enumerate(file_ids)]
-        bot.send_media_group(chat_id=TELEGRAM_CHANNEL_ID, media=media)
-        return True
+        else:
+            media = [InputMediaPhoto(f_id, caption=text, parse_mode="Markdown") if i == 0 else InputMediaPhoto(f_id) for i, f_id in enumerate(file_ids)]
+            bot.send_media_group(chat_id=TELEGRAM_CHANNEL_ID, media=media)
+        return "Опубликован!"
     except Exception as e:
-        print(f"!!! Ошибка ТГ: {e}")
-        return False
+        print(f"!!! Ошибка ТГ Markdown: {e}")
+        # Резервный план: если упало из-за Markdown, отправляем как чистый текст
+        try:
+            if len(file_ids) == 1:
+                bot.send_photo(chat_id=TELEGRAM_CHANNEL_ID, photo=file_ids[0], caption=text)
+            else:
+                media = [InputMediaPhoto(f_id, caption=text) if i == 0 else InputMediaPhoto(f_id) for i, f_id in enumerate(file_ids)]
+                bot.send_media_group(chat_id=TELEGRAM_CHANNEL_ID, media=media)
+            return "Опубликован (текст без разметки)"
+        except Exception as critical_err:
+            print(f"!!! Полный отказ отправки в ТГ: {critical_err}")
+            return f"❌ Ошибка API: {critical_err}"
 
 def process_album_and_post(chat_id, media_group_id):
     time.sleep(4.0)  
@@ -135,9 +145,11 @@ def process_album_and_post(chat_id, media_group_id):
     vk_post_id = post_to_vk_wall(base_text + VK_FOOTER, attachments=vk_attachments) if vk_attachments else None
     max_tokens = [upload_photo_to_max(u) for u in urls if upload_photo_to_max(u)]
     max_success = post_to_max(base_text + MAX_FOOTER, tokens=max_tokens) if max_tokens else False
-    tg_success = post_to_telegram_channel(base_text + TG_FOOTER, tg_file_ids)
+    
+    # Получаем детальный статус отправки в ТГ
+    tg_status = post_to_telegram_channel(base_text + TG_FOOTER, tg_file_ids)
 
-    report = f"📊 **Отчет SMM-Комбайна (3 в 1):**\n\n✅ ВК: {f'Опубликован (ID: {vk_post_id})' if vk_post_id else '❌ Ошибка'}\n✅ ТГ-Канал: {'Опубликован!' if tg_success else '❌ Ошибка'}\n✅ МАКС: {'Опубликован!' if max_success else '❌ Ошибка'}"
+    report = f"📊 **Отчет SMM-Комбайна (3 в 1):**\n\n✅ ВК: {f'Опубликован (ID: {vk_post_id})' if vk_post_id else '❌ Ошибка'}\n✅ ТГ-Канал: {tg_status}\n✅ МАКС: {'Опубликован!' if max_success else '❌ Ошибка'}"
     bot.edit_message_text(chat_id=chat_id, message_id=status_msg.message_id, text=report)
     
     with storage_lock:
@@ -166,13 +178,14 @@ def handle_smm_post(message):
         vk_post_id = post_to_vk_wall(text + VK_FOOTER, attachments=[vk_photo] if vk_photo else None)
         max_token = upload_photo_to_max(telegram_image_url)
         max_success = post_to_max(text + MAX_FOOTER, tokens=[max_token] if max_token else None)
-        tg_success = post_to_telegram_channel(text + TG_FOOTER, [file_id])
         
-        report = f"📊 **Отчет:**\n✅ ВК: {'Опубликовано' if vk_post_id else '❌ Ошибка'}\n✅ ТГ: {'Опубликовано' if tg_success else '❌ Ошибка'}\n✅ МАКС: {'Опубликовано' if max_success else '❌ Ошибка'}"
+        # Получаем детальный статус отправки в ТГ
+        tg_status = post_to_telegram_channel(text + TG_FOOTER, [file_id])
+        
+        report = f"📊 **Отчет:**\n✅ ВК: {'Опубликовано' if vk_post_id else '❌ Ошибка'}\n✅ ТГ: {tg_status}\n✅ МАКС: {'Опубликовано' if max_success else '❌ Ошибка'}"
         bot.edit_message_text(chat_id=message.chat.id, message_id=status_msg.message_id, text=report)
 
 if __name__ == "__main__":
-    # Жестко связываем Telegram с URL нашего сервера Render
     print("[SMM Комбайн]: Установка стабильного Webhook...")
     bot.remove_webhook()
     time.sleep(1)
