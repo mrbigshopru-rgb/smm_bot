@@ -26,11 +26,6 @@ bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 album_storage = {}
 storage_lock = threading.Lock()
 
-# Флаг для предотвращения повторного запуска бота в параллельных потоках Flask
-bot_started = False
-start_lock = threading.Lock()
-
-# === МИНИ ВЕБ-СЕРВЕР ДЛЯ ОБМАНА RENDER ===
 app = Flask(__name__)
 
 @app.route('/')
@@ -42,7 +37,6 @@ TG_FOOTER = """\n\nЗаказать вещи 🛍\nможно в [боте](http
 VK_FOOTER = """\n\nЗаказать вещи 🛍\nможно в боте🤖 t.me/poizon_life_bot через менеджера t.me/PoizonLifeRu box или в МАКС👋 inlnk.ru/NDdGgP\n \nНаши отзывы t.me/poizon_life_reviews 😍\nАдрес: Толубеевский проезд 8к2, офис 1378 📍 всегда ждём в гости ❤️"""
 MAX_FOOTER = """\n\nЗаказать вещи 🛍\nможно в [боте](https://t.me/poizon_life_bot)🤖 через менеджера в [МАКС](https://inlnk.ru/NDdGgP)👋\n \n[Наши отзывы](https://t.me/poizon_life_reviews) 😍\nАдрес: Толубеевский проезд 8к2, офис 1378 📍 всегда ждём в гости ❤️"""
 
-# === МЕТОДЫ ДЛЯ РАБОТЫ С МАКС API ===
 def upload_photo_to_max(image_url):
     headers = {"Authorization": MAX_ACCESS_TOKEN}
     try:
@@ -72,7 +66,6 @@ def post_to_max(text, tokens=None):
         return False
     except Exception: return False
 
-# === СТАНДАРТНЫЕ МЕТОДЫ ВК И ТГ ===
 def upload_photo_to_vk_wall(image_url):
     max_retries = 3
     for attempt in range(1, max_retries + 1):
@@ -113,7 +106,6 @@ def post_to_telegram_channel(text, file_ids):
         print(f"!!! Ошибка ТГ: {e}")
         return False
 
-# === ЛОГИКА СИНХРОНИЗАЦИИ ===
 def process_album_and_post(chat_id, media_group_id):
     time.sleep(4.0)  
     with storage_lock:
@@ -164,29 +156,20 @@ def handle_smm_post(message):
         report = f"📊 **Отчет:**\n✅ ВК: {'Опубликовано' if vk_post_id else '❌ Ошибка'}\n✅ ТГ: {'Опубликовано' if tg_success else '❌ Ошибка'}\n✅ МАКС: {'Опубликовано' if max_success else '❌ Ошибка'}"
         bot.edit_message_text(chat_id=message.chat.id, message_id=status_msg.message_id, text=report)
 
-def run_bot_safe():
-    global bot_started
-    with start_lock:
-        if bot_started:
-            return
-        bot_started = True
-    
+def run_bot_polling():
     try:
-        print("[SMM Комбайн]: Сброс сессий Telegram перед стартом...")
+        print("[SMM Комбайн]: Сброс сессий и запуск ТГ пуллинга...")
         bot.delete_webhook(drop_pending_updates=True)
-        time.sleep(2)
-        print("[SMM Комбайн]: Единственный поток пуллинга успешно запущен!")
-        bot.infinity_polling(timeout=20, long_polling_timeout=20)
+        time.sleep(1)
+        bot.infinity_polling()
     except Exception as e:
-        print(f"[Ошибка пуллинга]: {e}")
-        with start_lock:
-            bot_started = False
+        print(f"[Ошибка]: {e}")
 
 if __name__ == "__main__":
-    # Запускаем бота в строго изолированном потоке
-    threading.Thread(target=run_bot_safe, daemon=True).start()
-    
-    # Запускаем веб-сервер Flask для Render
+    # Запускаем пуллинг Телеграма в фоне СТРОГО один раз, игнорируя системные дубли gunicorn
+    if os.environ.get("WERKZEUG_RUN_MAIN") != "true":
+        threading.Thread(target=run_bot_polling, daemon=True).start()
+        
     port = int(os.environ.get("PORT", 10000))
     print(f"[Веб-Сервер]: Запуск Flask на порту {port}...")
     app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
