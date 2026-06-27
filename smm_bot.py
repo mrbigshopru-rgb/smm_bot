@@ -26,13 +26,16 @@ bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 album_storage = {}
 storage_lock = threading.Lock()
 
+# Флаг для предотвращения повторного запуска бота в параллельных потоках Flask
+bot_started = False
+start_lock = threading.Lock()
+
 # === МИНИ ВЕБ-СЕРВЕР ДЛЯ ОБМАНА RENDER ===
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    # Просто отдаем пустой текст пингатору, не трогая бота
-    return "OK", 200
+    return "SMM Комбайн активен и работает!", 200
 
 # === ШАБЛОНЫ ПОДПИСЕЙ С СЫЛКАМИ ===
 TG_FOOTER = """\n\nЗаказать вещи 🛍\nможно в [боте](https://t.me/poizon_life_bot)🤖 через [менеджера](https://t.me/PoizonLifeRu) или в [МАКС](https://inlnk.ru/NDdGgP)👋\n \n[Наши отзывы](https://t.me/poizon_life_reviews) 😍\nАдрес: Толубеевский проезд 8к2, офис 1378 📍 всегда ждём в гости ❤️"""
@@ -161,22 +164,29 @@ def handle_smm_post(message):
         report = f"📊 **Отчет:**\n✅ ВК: {'Опубликовано' if vk_post_id else '❌ Ошибка'}\n✅ ТГ: {'Опубликовано' if tg_success else '❌ Ошибка'}\n✅ МАКС: {'Опубликовано' if max_success else '❌ Ошибка'}"
         bot.edit_message_text(chat_id=message.chat.id, message_id=status_msg.message_id, text=report)
 
-# Фоновый поток запускает только Flask, чтобы Render успешно прошел проверку порта
-def start_flask():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+def run_bot_safe():
+    global bot_started
+    with start_lock:
+        if bot_started:
+            return
+        bot_started = True
+    
+    try:
+        print("[SMM Комбайн]: Сброс сессий Telegram перед стартом...")
+        bot.delete_webhook(drop_pending_updates=True)
+        time.sleep(2)
+        print("[SMM Комбайн]: Единственный поток пуллинга успешно запущен!")
+        bot.infinity_polling(timeout=20, long_polling_timeout=20)
+    except Exception as e:
+        print(f"[Ошибка пуллинга]: {e}")
+        with start_lock:
+            bot_started = False
 
 if __name__ == "__main__":
-    # 1. Сначала сбрасываем вебхуки и очищаем сессию в основном потоке
-    try:
-        bot.delete_webhook(drop_pending_updates=True)
-        time.sleep(1)
-    except Exception:
-        pass
-
-    # 2. Запускаем Flask в фоновом потоке, заблокировав перезапуск (use_reloader=False)
-    threading.Thread(target=start_flask, daemon=True).start()
+    # Запускаем бота в строго изолированном потоке
+    threading.Thread(target=run_bot_safe, daemon=True).start()
     
-    # 3. В самом главном потоке запускаем пуллинг. Теперь он ОДИН и никто его не дублирует!
-    print("[SMM Комбайн]: Чистый запуск пуллинга...")
-    bot.infinity_polling()
+    # Запускаем веб-сервер Flask для Render
+    port = int(os.environ.get("PORT", 10000))
+    print(f"[Веб-Сервер]: Запуск Flask на порту {port}...")
+    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
