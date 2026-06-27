@@ -3,8 +3,8 @@ import time
 import threading
 import requests
 import telebot
-from telebot.types import InputMediaPhoto
-from flask import Flask
+from telebot.types import InputMediaPhoto, Update
+from flask import Flask, request
 
 # Отключаем предупреждения об отключенной проверке SSL
 import urllib3
@@ -22,15 +22,30 @@ VK_USER_TOKEN = "vk1.a.kHVN4iOlUZfKTopqB_bB83XbUE1qQefWbqeFciHe3y0NizfLGKbQEAEaL
 MAX_ACCESS_TOKEN = "f9LHodD0cOJ7M2ZCCithS_gKv6HOMBiyGJTFTx1TPWP8L5H7EkVuaN0XaVMwFS8PLFpzaJRiYf1wbRCXbFZy"
 MAX_CHANNEL_ID = -73892456761348
 
-bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
+# URL твоего приложения на Render для вебхука
+RENDER_APP_URL = "https://smm-bot-service.onrender.com"
+
+bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, threaded=False)
 album_storage = {}
 storage_lock = threading.Lock()
 
 app = Flask(__name__)
 
+# Точка входа для пингатора UptimeRobot
 @app.route('/')
 def home():
-    return "SMM Комбайн активен и работает!", 200
+    return "SMM Комбайн активен и работает через Webhook!", 200
+
+# Точка входа для обновлений от Telegram
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_data().decode('utf-8')
+        update = Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return '', 200
+    else:
+        return 'Forbidden', 403
 
 # === ШАБЛОНЫ ПОДПИСЕЙ С СЫЛКАМИ ===
 TG_FOOTER = """\n\nЗаказать вещи 🛍\nможно в [боте](https://t.me/poizon_life_bot)🤖 через [менеджера](https://t.me/PoizonLifeRu) или в [МАКС](https://inlnk.ru/NDdGgP)👋\n \n[Наши отзывы](https://t.me/poizon_life_reviews) 😍\nАдрес: Толубеевский проезд 8к2, офис 1378 📍 всегда ждём в гости ❤️"""
@@ -156,23 +171,14 @@ def handle_smm_post(message):
         report = f"📊 **Отчет:**\n✅ ВК: {'Опубликовано' if vk_post_id else '❌ Ошибка'}\n✅ ТГ: {'Опубликовано' if tg_success else '❌ Ошибка'}\n✅ МАКС: {'Опубликовано' if max_success else '❌ Ошибка'}"
         bot.edit_message_text(chat_id=message.chat.id, message_id=status_msg.message_id, text=report)
 
-def run_bot_polling():
-    try:
-        print("[SMM Комбайн]: Сброс старых сессий...")
-        bot.delete_webhook(drop_pending_updates=True)
-        time.sleep(1)
-        print("[SMM Комбайн]: Запуск пуллинга Telegram...")
-        bot.infinity_polling()
-    except Exception as polling_error:
-        # Если процесс натыкается на 409 конфликт, он просто мягко засыпает, не роняя весь сервер
-        print(f"[Инфо]: Процесс пуллинга уступлен основному воркеру. Ошибка: {polling_error}")
-        while True:
-            time.sleep(3600)
-
 if __name__ == "__main__":
-    # Запускаем пуллинг в фоновом потоке с защитой от падения всего контейнера
-    threading.Thread(target=run_bot_polling, daemon=True).start()
-        
+    # Жестко связываем Telegram с URL нашего сервера Render
+    print("[SMM Комбайн]: Установка стабильного Webhook...")
+    bot.remove_webhook()
+    time.sleep(1)
+    bot.set_webhook(url=f"{RENDER_APP_URL}/webhook")
+    print("[SMM Комбайн]: Webhook успешно настроен!")
+    
     port = int(os.environ.get("PORT", 10000))
     print(f"[Веб-Сервер]: Запуск Flask на порту {port}...")
     app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
