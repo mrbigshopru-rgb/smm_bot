@@ -105,7 +105,9 @@ def post_to_telegram_channel(text, file_ids):
         media = [InputMediaPhoto(f_id, caption=text, parse_mode="Markdown") if i == 0 else InputMediaPhoto(f_id) for i, f_id in enumerate(file_ids)]
         bot.send_media_group(chat_id=TELEGRAM_CHANNEL_ID, media=media)
         return True
-    except Exception: return False
+    except Exception as e:
+        print(f"!!! КРИТИЧЕСКАЯ ОШИБКА ТГ В ОБЛАКЕ: {e}")
+        return False
 
 # === ЛОГИКА СИНХРОНИЗАЦИИ ===
 def process_album_and_post(chat_id, media_group_id):
