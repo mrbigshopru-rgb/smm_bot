@@ -13,7 +13,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 # === 1. НАСТРОЙКИ И КЛЮЧИ ===
 TELEGRAM_BOT_TOKEN = "8873978933:AAG1GhKOjgHzjpsrybW2pkqc7kO5cyGTU0I"
 ALLOWED_USERS = [5396240649, 5871786421] 
-TELEGRAM_CHANNEL_ID = -1001808345159
+TELEGRAM_CHANNEL_ID = -1001808345159 
 
 VK_API_VERSION = "5.131"
 VK_GROUP_ID = "218321182"
@@ -47,7 +47,7 @@ def webhook():
 
 # === ШАБЛОНЫ ПОДПИСЕЙ С СЫЛКАМИ ===
 TG_FOOTER = """\n\nЗаказать вещи 🛍\nможно в [боте](https://t.me/poizon_life_bot)🤖 через [менеджера](https://t.me/PoizonLifeRu) или в [МАКС](https://inlnk.ru/NDdGgP)👋\n \n[Наши отзывы](https://t.me/poizon_life_reviews) 😍\nАдрес: Толубеевский проезд 8к2, офис 1378 📍 всегда ждём в гости ❤️"""
-VK_FOOTER = """\n\nЗаказать вещи 🛍\nможно в боте🤖 t.me/poizon_life_bot через менеджера t.me/PoizonLifeRu box или в МАКС👋 inlnk.ru/NDdGgP\n \nНаши отзывы t.me/poizon_life_reviews) 😍\nАдрес: Толубеевский проезд 8к2, офис 1378 📍 всегда ждём в гости ❤️"""
+VK_FOOTER = """\n\nЗаказать вещи 🛍\nможно в боте🤖 t.me/poizon_life_bot через менеджера t.me/PoizonLifeRu box или в МАКС👋 inlnk.ru/NDdGgP\n \nНаши отзывы t.me/poizon_life_reviews 😍\nАдрес: Толубеевский проезд 8к2, офис 1378 📍 всегда ждём в гости ❤️"""
 MAX_FOOTER = """\n\nЗаказать вещи 🛍\nможно в [боте](https://t.me/poizon_life_bot)🤖 через менеджера в [МАКС](https://inlnk.ru/NDdGgP)👋\n \n[Наши отзывы](https://t.me/poizon_life_reviews) 😍\nАдрес: Толубеевский проезд 8к2, офис 1378 📍 всегда ждём в гости ❤️"""
 
 def upload_photo_to_max(image_url):
@@ -107,10 +107,18 @@ def post_to_vk_wall(text, attachments=None):
         return res.get('response', {}).get('post_id')
     except Exception: return None
 
-# === УМНЫЙ МЕТОД ОТПРАВКИ В ТГ ===
-def post_to_telegram_channel(text, file_ids):
+# === УМНЫЙ МЕТОД ОТПРАВКИ В ТГ С УЧЕТОМ ДЛИНЫ ТЕКСТА ===
+def post_to_telegram_channel(text, file_ids, single_img_url=None):
     try:
-        # Пробуем стандартную отправку с Markdown
+        # Если текст длиннее 1024 символов, применяем метод скрытой ссылки (только для Markdown)
+        if len(text) > 1024 and single_img_url:
+            # Прячем картинку в первый невидимый символ-ссылку
+            hidden_link = f"[\u200b]({single_img_url})"
+            full_text = hidden_link + text
+            bot.send_message(chat_id=TELEGRAM_CHANNEL_ID, text=full_text, parse_mode="Markdown")
+            return "Опубликован! (Текст > 1024 через скрытую ссылку)"
+
+        # Стандартный режим (до 1024 символов)
         if len(file_ids) == 1:
             bot.send_photo(chat_id=TELEGRAM_CHANNEL_ID, photo=file_ids[0], caption=text, parse_mode="Markdown")
         else:
@@ -119,7 +127,7 @@ def post_to_telegram_channel(text, file_ids):
         return "Опубликован!"
     except Exception as e:
         print(f"!!! Ошибка ТГ Markdown: {e}")
-        # Резервный план: если упало из-за Markdown, отправляем как чистый текст
+        # Резервный план без Markdown разметки
         try:
             if len(file_ids) == 1:
                 bot.send_photo(chat_id=TELEGRAM_CHANNEL_ID, photo=file_ids[0], caption=text)
@@ -128,11 +136,11 @@ def post_to_telegram_channel(text, file_ids):
                 bot.send_media_group(chat_id=TELEGRAM_CHANNEL_ID, media=media)
             return "Опубликован (текст без разметки)"
         except Exception as critical_err:
-            print(f"!!! Полный отказ отправки в ТГ: {critical_err}")
             return f"❌ Ошибка API: {critical_err}"
 
 def process_album_and_post(chat_id, media_group_id):
-    time.sleep(4.0)  
+    # Увеличили время ожидания до 7 секунд для гарантированного сбора тяжелых альбомов
+    time.sleep(7.0)  
     with storage_lock:
         if media_group_id not in album_storage or album_storage[media_group_id].get("processed"): return
         data = album_storage[media_group_id]
@@ -146,8 +154,8 @@ def process_album_and_post(chat_id, media_group_id):
     max_tokens = [upload_photo_to_max(u) for u in urls if upload_photo_to_max(u)]
     max_success = post_to_max(base_text + MAX_FOOTER, tokens=max_tokens) if max_tokens else False
     
-    # Получаем детальный статус отправки в ТГ
-    tg_status = post_to_telegram_channel(base_text + TG_FOOTER, tg_file_ids)
+    # Для альбома в ТГ при превышении лимита берем первую картинку как обложку
+    tg_status = post_to_telegram_channel(base_text + TG_FOOTER, tg_file_ids, single_img_url=urls[0] if urls else None)
 
     report = f"📊 **Отчет SMM-Комбайна (3 в 1):**\n\n✅ ВК: {f'Опубликован (ID: {vk_post_id})' if vk_post_id else '❌ Ошибка'}\n✅ ТГ-Канал: {tg_status}\n✅ МАКС: {'Опубликован!' if max_success else '❌ Ошибка'}"
     bot.edit_message_text(chat_id=chat_id, message_id=status_msg.message_id, text=report)
@@ -179,8 +187,7 @@ def handle_smm_post(message):
         max_token = upload_photo_to_max(telegram_image_url)
         max_success = post_to_max(text + MAX_FOOTER, tokens=[max_token] if max_token else None)
         
-        # Получаем детальный статус отправки в ТГ
-        tg_status = post_to_telegram_channel(text + TG_FOOTER, [file_id])
+        tg_status = post_to_telegram_channel(text + TG_FOOTER, [file_id], single_img_url=telegram_image_url)
         
         report = f"📊 **Отчет:**\n✅ ВК: {'Опубликовано' if vk_post_id else '❌ Ошибка'}\n✅ ТГ: {tg_status}\n✅ МАКС: {'Опубликовано' if max_success else '❌ Ошибка'}"
         bot.edit_message_text(chat_id=message.chat.id, message_id=status_msg.message_id, text=report)
