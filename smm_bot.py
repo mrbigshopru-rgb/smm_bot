@@ -81,31 +81,77 @@ def post_to_max(text, tokens=None):
 
 def upload_photo_to_vk_wall(image_url):
     max_retries = 3
+    gid = int(str(VK_GROUP_ID).replace("-", ""))
     for attempt in range(1, max_retries + 1):
         try:
-            get_server_url = "https://api.vk.com/method/photos.getWallUploadServer"
-            server_res = requests.get(get_server_url, params={"access_token": VK_USER_TOKEN, "v": VK_API_VERSION, "group_id": VK_GROUP_ID}, timeout=15).json()
+            # 1. Получаем сервер для загрузки
+            server_res = requests.get(
+                "https://api.vk.com/method/photos.getWallUploadServer",
+                params={"access_token": VK_USER_TOKEN, "v": VK_API_VERSION, "group_id": gid},
+                timeout=15
+            ).json()
             upload_url = server_res.get("response", {}).get("upload_url")
-            if not upload_url: continue
-            photo_data = requests.get(image_url, timeout=15).content
-            upload_res = requests.post(upload_url, files={'photo': ('photo.jpg', photo_data)}, timeout=30).json()
-            if not upload_res.get("photo"):
-                time.sleep(2)
+            if not upload_url:
+                print(f"[VK Upload Server Error]: {server_res}")
                 continue
-            save_res = requests.get("https://api.vk.com/method/photos.saveWallPhoto", params={"access_token": VK_USER_TOKEN, "v": VK_API_VERSION, "group_id": VK_GROUP_ID, "photo": upload_res.get("photo"), "server": upload_res.get("server"), "hash": upload_res.get("hash")}, timeout=15).json()
-            photo_info = save_res.get("response", [{}])[0]
-            if photo_info.get("owner_id") and photo_info.get("id"): return f"photo{photo_info['owner_id']}_{photo_info['id']}"
-        except Exception:
-            if attempt < max_retries: time.sleep(3)
+
+            # 2. Скачиваем фото из Telegram и отправляем на сервер VK
+            photo_data = requests.get(image_url, timeout=15).content
+            upload_res = requests.post(
+                upload_url,
+                files={'photo': ('photo.jpg', photo_data)},
+                timeout=30
+            ).json()
+
+            # 3. Сохраняем фото на стене сообщества с обязательными параметрами server, photo, hash
+            save_params = {
+                "access_token": VK_USER_TOKEN,
+                "v": VK_API_VERSION,
+                "group_id": gid,
+                "photo": upload_res.get("photo"),
+                "server": upload_res.get("server"),
+                "hash": upload_res.get("hash")
+            }
+            save_res = requests.post(
+                "https://api.vk.com/method/photos.saveWallPhoto",
+                data=save_params,
+                timeout=15
+            ).json()
+
+            photo_list = save_res.get("response", [])
+            if photo_list:
+                item = photo_list[0]
+                return f"photo{item['owner_id']}_{item['id']}"
+            else:
+                print(f"[VK Save Photo Error]: {save_res}")
+
+        except Exception as e:
+            print(f"[VK Upload Exception]: {e}")
+            if attempt < max_retries:
+                time.sleep(3)
     return None
 
 def post_to_vk_wall(text, attachments=None):
     try:
-        payload = {"access_token": VK_USER_TOKEN, "v": VK_API_VERSION, "owner_id": f"-{VK_GROUP_ID}", "from_group": 1, "signed": 0, "message": text, "primary_attachments_mode": "grid"}
-        if attachments: payload["attachments"] = ",".join(attachments)
+        gid = int(str(VK_GROUP_ID).replace("-", ""))
+        payload = {
+            "access_token": VK_USER_TOKEN,
+            "v": VK_API_VERSION,
+            "owner_id": -gid,
+            "from_group": 1,
+            "signed": 0,
+            "message": text
+        }
+        if attachments:
+            payload["attachments"] = ",".join(attachments)
         res = requests.post("https://api.vk.com/method/wall.post", data=payload, timeout=15).json()
-        return res.get('response', {}).get('post_id')
-    except Exception: return None
+        post_id = res.get('response', {}).get('post_id')
+        if not post_id:
+            print(f"[VK Wall Post Error]: {res}")
+        return post_id
+    except Exception as e:
+        print(f"[VK Wall Exception]: {e}")
+        return None
 
 # === УМНЫЙ МЕТОД ОТПРАВКИ В ТГ С УЧЕТОМ ДЛИНЫ ТЕКСТА ===
 def post_to_telegram_channel(text, file_ids, single_img_url=None):
